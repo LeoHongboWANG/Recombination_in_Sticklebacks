@@ -14,4 +14,7 @@ do
     
     # Move the file into the new directory
     mv $file $dir_name/
+
+    # Extract the second line from the file and save it to sorted_bams
+    awk 'NR==2{for(i=3; i<=NF; i++) print $i}' $dir_name/$file > $dir_name/sorted_bams
 done
