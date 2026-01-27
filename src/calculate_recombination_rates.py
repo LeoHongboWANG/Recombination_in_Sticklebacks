@@ -6,14 +6,14 @@ from scipy import stats
 def calculate_recombination_rate_linear(window_data, window_size):
     slope, intercept, r_value, p_value, std_err = stats.linregress(window_data["pos_bp"], window_data["pos_cM"])
     rate = slope * 1e6
-    return max(0, rate)  # Ensure non-negative rate
+    return max(0, rate) 
 
 def calculate_recombination_rate_maxmin(window_data, window_size):
     min_cM = window_data["pos_cM"].min()
     max_cM = window_data["pos_cM"].max()
     delta_cM = max_cM - min_cM
-    rate = (delta_cM / (window_size / 1e6))  # Recombination rate in cM/Mb
-    return max(0, rate)  # Ensure non-negative rate
+    rate = (delta_cM / (window_size / 1e6))
+    return max(0, rate) 
 
 def calculate_recombination_rates(linkage_map_file, window_size, shift, threshold, method):
     linkage_map = pd.read_csv(linkage_map_file, sep="\t", header=None, names=["chr", "pos_bp", "pos_cM"])
@@ -43,7 +43,7 @@ def calculate_recombination_rates(linkage_map_file, window_size, shift, threshol
                 
                 if rate < 0:
                     negative_count += 1
-                    rate = 0  # Set negative values to 0
+                    rate = 0 
             else:
                 rate = np.nan
             
