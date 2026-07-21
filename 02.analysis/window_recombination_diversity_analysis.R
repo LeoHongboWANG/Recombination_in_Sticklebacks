@@ -190,346 +190,6 @@ multiplesheets <- function(fname) {
 }
 
 # -----------------------------
-# 5 Mb window data
-# -----------------------------
-
-gene_data <- read.table(
-  "data/gene_density_5Mb.txt",
-  header = FALSE,
-  sep = "\t"
-)
-
-cpg_data <- read.table(
-  "data/cpg_5Mb.txt",
-  header = FALSE,
-  sep = "\t"
-)
-
-colnames(gene_data) <- c(
-  "chr", "start_bp", "gene_end_bp", "number_gene",
-  "gene_length", "window_length", "gene_density"
-)
-
-colnames(cpg_data) <- c(
-  "chr", "start_bp", "cpg_end_bp", "cpg_content"
-)
-
-gene_data <- gene_data %>%
-  filter(chr != "LG12")
-
-cpg_data <- cpg_data %>%
-  filter(chr != "LG12")
-
-all_data <- list()
-
-for (pop in populations) {
-  recomb_data <- read.table(
-    paste0("data/", pop, "_5Mb_5kb"),
-    header = TRUE,
-    sep = "\t"
-  )
-
-  pi_data <- read.table(
-    paste0("data/", pop, "_pi_5Mb_5kb.windowed.pi"),
-    header = TRUE,
-    sep = "\t"
-  )
-
-  recomb_data <- recomb_data %>%
-    filter(chr != "LG12")
-
-  pi_data <- pi_data %>%
-    filter(CHROM != "LG12")
-
-  colnames(pi_data) <- c(
-    "chr", "start_bp", "end_bp", "N_VARIANTS", "PI"
-  )
-
-  pi_data$start_bp <- pi_data$start_bp - 1
-
-  recomb_data$chr <- as.character(recomb_data$chr)
-  pi_data$chr <- as.character(pi_data$chr)
-
-  merged_data <- recomb_data %>%
-    left_join(pi_data, by = c("chr", "start_bp", "end_bp")) %>%
-    left_join(gene_data, by = c("chr", "start_bp")) %>%
-    left_join(cpg_data, by = c("chr", "start_bp"))
-
-  merged_data$Population <- pop
-  merged_data$sex_ratio <- sex_ratio_data$Sex_Ratio[sex_ratio_data$Population == pop]
-  merged_data$Ecotype <- sex_ratio_data$Ecotype[sex_ratio_data$Population == pop]
-
-  all_data[[pop]] <- merged_data
-}
-
-combined_data <- bind_rows(all_data)
-
-combined_data$end_bp <- combined_data$gene_end_bp
-combined_data$gene_end_bp <- NULL
-
-combined_data <- combined_data %>%
-  mutate(
-    rho_scaled = as.numeric(scale(rho)),
-    gene_density_scaled = as.numeric(scale(gene_density)),
-    cpg_content_scaled = as.numeric(scale(cpg_content)),
-    sex_ratio_scaled = as.numeric(scale(sex_ratio))
-  )
-
-write.csv(
-  combined_data,
-  "results/combined_5Mb_window_data.csv",
-  row.names = FALSE
-)
-
-top_5_percent <- combined_data %>%
-  group_by(Ecotype) %>%
-  filter(rho >= quantile(rho, 0.95, na.rm = TRUE)) %>%
-  ungroup()
-
-low_5_percent <- combined_data %>%
-  filter(rho != 0) %>%
-  group_by(Ecotype) %>%
-  filter(rho <= quantile(rho, 0.05, na.rm = TRUE)) %>%
-  ungroup()
-
-write.csv(top_5_percent, "results/top_5_percent_rho_5Mb.csv", row.names = FALSE)
-write.csv(low_5_percent, "results/low_5_percent_rho_5Mb.csv", row.names = FALSE)
-
-p_rho_hist <- ggplot(combined_data, aes(x = rho, fill = Ecotype)) +
-  geom_histogram(alpha = 0.5, position = "identity", bins = 30) +
-  theme_classic(base_size = 10) +
-  scale_fill_manual(values = eco_colors) +
-  xlab("Recombination rate") +
-  ylab("Count")
-
-ggsave(
-  "figures/5Mb_rho_histogram.png",
-  p_rho_hist,
-  width = 5,
-  height = 4,
-  dpi = 300
-)
-
-p_top5 <- ggplot(top_5_percent, aes(x = Ecotype, y = rho, fill = Ecotype)) +
-  geom_violin(outlier.shape = NA) +
-  theme_classic(base_size = 10) +
-  xlab("Ecotype") +
-  ylab("Top 5% recombination rate") +
-  stat_compare_means(method = "t.test", size = 3.5) +
-  scale_fill_manual(values = eco_colors) +
-  guides(fill = "none")
-
-ggsave(
-  "figures/5Mb_top5_rho_ecotype.png",
-  p_top5,
-  width = 4,
-  height = 4,
-  dpi = 300
-)
-
-p_low5 <- ggplot(low_5_percent, aes(x = Ecotype, y = rho, fill = Ecotype)) +
-  geom_violin(outlier.shape = NA) +
-  theme_classic(base_size = 10) +
-  xlab("Ecotype") +
-  ylab("Low 5% recombination rate") +
-  stat_compare_means(method = "t.test", size = 3.5) +
-  scale_fill_manual(values = eco_colors) +
-  guides(fill = "none")
-
-ggsave(
-  "figures/5Mb_low5_rho_ecotype.png",
-  p_low5,
-  width = 4,
-  height = 4,
-  dpi = 300
-)
-
-model_5Mb_pi <- lmer(
-  PI ~ rho * Ecotype + gene_density + cpg_content + sex_ratio + (1 | Population),
-  data = combined_data
-)
-
-sink("results/model_5Mb_pi_summary.txt")
-print(summary(model_5Mb_pi))
-cat("\nCorrelation between CpG content and recombination rate\n")
-print(cor.test(combined_data$cpg_content, combined_data$rho, method = "pearson"))
-sink()
-
-# -----------------------------
-# Supplementary family-level recombination rate
-# -----------------------------
-
-supp <- multiplesheets("data/Supplementary_data.xlsx")
-Family_r <- as.data.frame(supp[["Sheet1"]])
-
-p_family_sex <- Family_r %>%
-  filter(Ref == "PYOref") %>%
-  ggplot(aes(x = Sex, y = ats_r, fill = Ecotype)) +
-  geom_boxplot(linewidth = 0.8) +
-  labs(x = "Sex", y = "Family-level recombination rate (cM/Mb)") +
-  stat_compare_means(aes(group = Ecotype), label = "p.format", label.y = 6.6, size = 3) +
-  stat_compare_means(aes(group = Sex), label = "p.format", label.y = 7, size = 3) +
-  scale_fill_manual(values = eco_colors) +
-  theme_classic(base_size = 12)
-
-ggsave(
-  "figures/family_recombination_rate_by_sex.png",
-  p_family_sex,
-  width = 4,
-  height = 4,
-  dpi = 300
-)
-
-p_family_age <- Family_r %>%
-  filter(Ref == "TVAref") %>%
-  ggplot(aes(x = age, y = ats_r, color = Sex, fill = Sex)) +
-  geom_point(size = 0.8, position = position_dodge(0.1)) +
-  geom_smooth(method = "glm", alpha = 0.2) +
-  scale_color_manual(values = sex_colors, name = NULL) +
-  scale_fill_manual(values = sex_colors, name = NULL) +
-  labs(x = "Parental age", y = "Recombination rate (cM/Mb)") +
-  theme_classic(base_size = 12) +
-  guides(color = "none", fill = "none")
-
-ggsave(
-  "figures/family_recombination_rate_by_age.png",
-  p_family_age,
-  width = 4,
-  height = 4,
-  dpi = 300
-)
-
-family_test <- Family_r %>%
-  group_by(Ref, Family) %>%
-  summarise(
-    mean_atsr = mean(ats_r, na.rm = TRUE),
-    Ecotype = first(Ecotype),
-    .groups = "drop"
-  ) %>%
-  t_test(mean_atsr ~ Ecotype) %>%
-  adjust_pvalue(method = "bonferroni") %>%
-  add_significance()
-
-write.csv(
-  family_test,
-  "results/family_recombination_rate_ttest.csv",
-  row.names = FALSE
-)
-
-# -----------------------------
-# 1 Mb / 10 kb data
-# -----------------------------
-
-pi <- read.csv("data/pi_1mb10kb.txt", sep = "\t", header = FALSE)
-
-colnames(pi) <- c(
-  "Population", "Chr", "Start", "End",
-  "Marker_number", "pi", "sex"
-)
-
-pi$Start <- pi$Start - 1
-pi$Chr <- factor(pi$Chr, levels = chr_order)
-
-rrate.eco <- read.csv(
-  "data/ecotype_level_1mb10kb.txt",
-  sep = "\t",
-  header = FALSE
-)
-
-rrate.eco <- rrate.eco[, c(1, 3, 4, 5, 6, 7, 8)]
-
-colnames(rrate.eco) <- c(
-  "Ecotype", "Sex", "Chr", "Start",
-  "End", "r", "Marker_number"
-)
-
-rrate.eco$Ecotype <- recode(rrate.eco$Ecotype, "Pond" = "Freshwater")
-rrate.eco$Chr <- factor(rrate.eco$Chr, levels = chr_order)
-
-rrate.eco <- rrate.eco %>%
-  left_join(
-    pi,
-    by = c(
-      "Ecotype" = "Population",
-      "Chr",
-      "Start",
-      "End"
-    )
-  )
-
-rrate.pop <- read.csv(
-  "data/population_level_1mb10kb.txt",
-  sep = "\t",
-  header = FALSE
-)
-
-rrate.pop <- rrate.pop[, c(1, 3, 4, 5, 6, 7, 8)]
-
-colnames(rrate.pop) <- c(
-  "Population", "Sex", "Chr", "Start",
-  "End", "r", "Marker_number"
-)
-
-rrate.pop$Population <- factor(rrate.pop$Population, levels = pop_order)
-rrate.pop$Chr <- factor(rrate.pop$Chr, levels = chr_order)
-
-cpg <- read.csv("data/m_1mb10kb.txt", sep = "\t", header = FALSE)
-cpg <- cpg[, c(1, 2, 3, 7)]
-colnames(cpg) <- c("Chr", "Start", "End", "cpg")
-cpg$Chr <- factor(cpg$Chr, levels = chr_order)
-
-gene <- read.csv("data/gene_density_1mb10kb.txt", sep = "\t", header = FALSE)
-gene <- gene[, c(1, 2, 3, 7)]
-colnames(gene) <- c("Chr", "Start", "End", "gene_density")
-gene$Chr <- factor(gene$Chr, levels = chr_order)
-
-rrate.eco <- rrate.eco %>%
-  left_join(gene, by = c("Chr", "Start", "End")) %>%
-  left_join(cpg, by = c("Chr", "Start", "End"))
-
-rrate.pop <- rrate.pop %>%
-  left_join(pi, by = c("Population", "Chr", "Start", "End")) %>%
-  left_join(gene, by = c("Chr", "Start", "End")) %>%
-  left_join(cpg, by = c("Chr", "Start", "End"))
-
-write.csv(rrate.eco, "results/rrate_ecotype_1mb10kb_merged.csv", row.names = FALSE)
-write.csv(rrate.pop, "results/rrate_population_1mb10kb_merged.csv", row.names = FALSE)
-
-p_eco_r_pi <- rrate.eco %>%
-  filter(Sex == "male", r < 20) %>%
-  ggplot(aes(x = r, y = pi, color = Ecotype)) +
-  geom_point(alpha = 0.2, size = 0.2) +
-  geom_smooth(method = "glm", alpha = 0.5) +
-  theme_minimal() +
-  labs(x = "Recombination rate (cM/Mb)", y = "Nucleotide diversity") +
-  scale_color_manual(values = eco_colors)
-
-ggsave(
-  "figures/1mb10kb_ecotype_male_r_pi.png",
-  p_eco_r_pi,
-  width = 5,
-  height = 4,
-  dpi = 300
-)
-
-p_pop_r_pi <- rrate.pop %>%
-  filter(Sex == "female", r < 30) %>%
-  ggplot(aes(x = r, y = pi, color = Population)) +
-  geom_point(alpha = 0.2, size = 0.2) +
-  geom_smooth(method = "glm", alpha = 0.5) +
-  theme_minimal() +
-  labs(x = "Recombination rate (cM/Mb)", y = "Nucleotide diversity") +
-  scale_color_manual(values = pop_colors, name = NULL)
-
-ggsave(
-  "figures/1mb10kb_population_female_r_pi.png",
-  p_pop_r_pi,
-  width = 5,
-  height = 4,
-  dpi = 300
-)
-
-# -----------------------------
 # 1 Mb / 200 kb data
 # -----------------------------
 
@@ -1059,6 +719,347 @@ plot_residuals(
 )
 
 # -----------------------------
+# 5 Mb window data
+# -----------------------------
+
+gene_data <- read.table(
+  "data/gene_density_5Mb.txt",
+  header = FALSE,
+  sep = "\t"
+)
+
+cpg_data <- read.table(
+  "data/cpg_5Mb.txt",
+  header = FALSE,
+  sep = "\t"
+)
+
+colnames(gene_data) <- c(
+  "chr", "start_bp", "gene_end_bp", "number_gene",
+  "gene_length", "window_length", "gene_density"
+)
+
+colnames(cpg_data) <- c(
+  "chr", "start_bp", "cpg_end_bp", "cpg_content"
+)
+
+gene_data <- gene_data %>%
+  filter(chr != "LG12")
+
+cpg_data <- cpg_data %>%
+  filter(chr != "LG12")
+
+all_data <- list()
+
+for (pop in populations) {
+  recomb_data <- read.table(
+    paste0("data/", pop, "_5Mb_5kb"),
+    header = TRUE,
+    sep = "\t"
+  )
+
+  pi_data <- read.table(
+    paste0("data/", pop, "_pi_5Mb_5kb.windowed.pi"),
+    header = TRUE,
+    sep = "\t"
+  )
+
+  recomb_data <- recomb_data %>%
+    filter(chr != "LG12")
+
+  pi_data <- pi_data %>%
+    filter(CHROM != "LG12")
+
+  colnames(pi_data) <- c(
+    "chr", "start_bp", "end_bp", "N_VARIANTS", "PI"
+  )
+
+  pi_data$start_bp <- pi_data$start_bp - 1
+
+  recomb_data$chr <- as.character(recomb_data$chr)
+  pi_data$chr <- as.character(pi_data$chr)
+
+  merged_data <- recomb_data %>%
+    left_join(pi_data, by = c("chr", "start_bp", "end_bp")) %>%
+    left_join(gene_data, by = c("chr", "start_bp")) %>%
+    left_join(cpg_data, by = c("chr", "start_bp"))
+
+  merged_data$Population <- pop
+  merged_data$sex_ratio <- sex_ratio_data$Sex_Ratio[sex_ratio_data$Population == pop]
+  merged_data$Ecotype <- sex_ratio_data$Ecotype[sex_ratio_data$Population == pop]
+
+  all_data[[pop]] <- merged_data
+}
+
+combined_data <- bind_rows(all_data)
+
+combined_data$end_bp <- combined_data$gene_end_bp
+combined_data$gene_end_bp <- NULL
+
+combined_data <- combined_data %>%
+  mutate(
+    rho_scaled = as.numeric(scale(rho)),
+    gene_density_scaled = as.numeric(scale(gene_density)),
+    cpg_content_scaled = as.numeric(scale(cpg_content)),
+    sex_ratio_scaled = as.numeric(scale(sex_ratio))
+  )
+
+write.csv(
+  combined_data,
+  "results/combined_5Mb_window_data.csv",
+  row.names = FALSE
+)
+
+top_5_percent <- combined_data %>%
+  group_by(Ecotype) %>%
+  filter(rho >= quantile(rho, 0.95, na.rm = TRUE)) %>%
+  ungroup()
+
+low_5_percent <- combined_data %>%
+  filter(rho != 0) %>%
+  group_by(Ecotype) %>%
+  filter(rho <= quantile(rho, 0.05, na.rm = TRUE)) %>%
+  ungroup()
+
+write.csv(top_5_percent, "results/top_5_percent_rho_5Mb.csv", row.names = FALSE)
+write.csv(low_5_percent, "results/low_5_percent_rho_5Mb.csv", row.names = FALSE)
+
+p_rho_hist <- ggplot(combined_data, aes(x = rho, fill = Ecotype)) +
+  geom_histogram(alpha = 0.5, position = "identity", bins = 30) +
+  theme_classic(base_size = 10) +
+  scale_fill_manual(values = eco_colors) +
+  xlab("Recombination rate") +
+  ylab("Count")
+
+ggsave(
+  "figures/5Mb_rho_histogram.png",
+  p_rho_hist,
+  width = 5,
+  height = 4,
+  dpi = 300
+)
+
+p_top5 <- ggplot(top_5_percent, aes(x = Ecotype, y = rho, fill = Ecotype)) +
+  geom_violin(outlier.shape = NA) +
+  theme_classic(base_size = 10) +
+  xlab("Ecotype") +
+  ylab("Top 5% recombination rate") +
+  stat_compare_means(method = "t.test", size = 3.5) +
+  scale_fill_manual(values = eco_colors) +
+  guides(fill = "none")
+
+ggsave(
+  "figures/5Mb_top5_rho_ecotype.png",
+  p_top5,
+  width = 4,
+  height = 4,
+  dpi = 300
+)
+
+p_low5 <- ggplot(low_5_percent, aes(x = Ecotype, y = rho, fill = Ecotype)) +
+  geom_violin(outlier.shape = NA) +
+  theme_classic(base_size = 10) +
+  xlab("Ecotype") +
+  ylab("Low 5% recombination rate") +
+  stat_compare_means(method = "t.test", size = 3.5) +
+  scale_fill_manual(values = eco_colors) +
+  guides(fill = "none")
+
+ggsave(
+  "figures/5Mb_low5_rho_ecotype.png",
+  p_low5,
+  width = 4,
+  height = 4,
+  dpi = 300
+)
+
+model_5Mb_pi <- lmer(
+  PI ~ rho * Ecotype + gene_density + cpg_content + sex_ratio + (1 | Population),
+  data = combined_data
+)
+
+sink("results/model_5Mb_pi_summary.txt")
+print(summary(model_5Mb_pi))
+cat("\nCorrelation between CpG content and recombination rate\n")
+print(cor.test(combined_data$cpg_content, combined_data$rho, method = "pearson"))
+sink()
+
+# -----------------------------
+# Supplementary family-level recombination rate
+# -----------------------------
+
+supp <- multiplesheets("data/Supplementary_data.xlsx")
+Family_r <- as.data.frame(supp[["Sheet1"]])
+
+p_family_sex <- Family_r %>%
+  filter(Ref == "PYOref") %>%
+  ggplot(aes(x = Sex, y = ats_r, fill = Ecotype)) +
+  geom_boxplot(linewidth = 0.8) +
+  labs(x = "Sex", y = "Family-level recombination rate (cM/Mb)") +
+  stat_compare_means(aes(group = Ecotype), label = "p.format", label.y = 6.6, size = 3) +
+  stat_compare_means(aes(group = Sex), label = "p.format", label.y = 7, size = 3) +
+  scale_fill_manual(values = eco_colors) +
+  theme_classic(base_size = 12)
+
+ggsave(
+  "figures/family_recombination_rate_by_sex.png",
+  p_family_sex,
+  width = 4,
+  height = 4,
+  dpi = 300
+)
+
+p_family_age <- Family_r %>%
+  filter(Ref == "TVAref") %>%
+  ggplot(aes(x = age, y = ats_r, color = Sex, fill = Sex)) +
+  geom_point(size = 0.8, position = position_dodge(0.1)) +
+  geom_smooth(method = "glm", alpha = 0.2) +
+  scale_color_manual(values = sex_colors, name = NULL) +
+  scale_fill_manual(values = sex_colors, name = NULL) +
+  labs(x = "Parental age", y = "Recombination rate (cM/Mb)") +
+  theme_classic(base_size = 12) +
+  guides(color = "none", fill = "none")
+
+ggsave(
+  "figures/family_recombination_rate_by_age.png",
+  p_family_age,
+  width = 4,
+  height = 4,
+  dpi = 300
+)
+
+family_test <- Family_r %>%
+  group_by(Ref, Family) %>%
+  summarise(
+    mean_atsr = mean(ats_r, na.rm = TRUE),
+    Ecotype = first(Ecotype),
+    .groups = "drop"
+  ) %>%
+  t_test(mean_atsr ~ Ecotype) %>%
+  adjust_pvalue(method = "bonferroni") %>%
+  add_significance()
+
+write.csv(
+  family_test,
+  "results/family_recombination_rate_ttest.csv",
+  row.names = FALSE
+)
+
+# -----------------------------
+# 1 Mb / 10 kb data
+# -----------------------------
+
+pi <- read.csv("data/pi_1mb10kb.txt", sep = "\t", header = FALSE)
+
+colnames(pi) <- c(
+  "Population", "Chr", "Start", "End",
+  "Marker_number", "pi", "sex"
+)
+
+pi$Start <- pi$Start - 1
+pi$Chr <- factor(pi$Chr, levels = chr_order)
+
+rrate.eco <- read.csv(
+  "data/ecotype_level_1mb10kb.txt",
+  sep = "\t",
+  header = FALSE
+)
+
+rrate.eco <- rrate.eco[, c(1, 3, 4, 5, 6, 7, 8)]
+
+colnames(rrate.eco) <- c(
+  "Ecotype", "Sex", "Chr", "Start",
+  "End", "r", "Marker_number"
+)
+
+rrate.eco$Ecotype <- recode(rrate.eco$Ecotype, "Pond" = "Freshwater")
+rrate.eco$Chr <- factor(rrate.eco$Chr, levels = chr_order)
+
+rrate.eco <- rrate.eco %>%
+  left_join(
+    pi,
+    by = c(
+      "Ecotype" = "Population",
+      "Chr",
+      "Start",
+      "End"
+    )
+  )
+
+rrate.pop <- read.csv(
+  "data/population_level_1mb10kb.txt",
+  sep = "\t",
+  header = FALSE
+)
+
+rrate.pop <- rrate.pop[, c(1, 3, 4, 5, 6, 7, 8)]
+
+colnames(rrate.pop) <- c(
+  "Population", "Sex", "Chr", "Start",
+  "End", "r", "Marker_number"
+)
+
+rrate.pop$Population <- factor(rrate.pop$Population, levels = pop_order)
+rrate.pop$Chr <- factor(rrate.pop$Chr, levels = chr_order)
+
+cpg <- read.csv("data/m_1mb10kb.txt", sep = "\t", header = FALSE)
+cpg <- cpg[, c(1, 2, 3, 7)]
+colnames(cpg) <- c("Chr", "Start", "End", "cpg")
+cpg$Chr <- factor(cpg$Chr, levels = chr_order)
+
+gene <- read.csv("data/gene_density_1mb10kb.txt", sep = "\t", header = FALSE)
+gene <- gene[, c(1, 2, 3, 7)]
+colnames(gene) <- c("Chr", "Start", "End", "gene_density")
+gene$Chr <- factor(gene$Chr, levels = chr_order)
+
+rrate.eco <- rrate.eco %>%
+  left_join(gene, by = c("Chr", "Start", "End")) %>%
+  left_join(cpg, by = c("Chr", "Start", "End"))
+
+rrate.pop <- rrate.pop %>%
+  left_join(pi, by = c("Population", "Chr", "Start", "End")) %>%
+  left_join(gene, by = c("Chr", "Start", "End")) %>%
+  left_join(cpg, by = c("Chr", "Start", "End"))
+
+write.csv(rrate.eco, "results/rrate_ecotype_1mb10kb_merged.csv", row.names = FALSE)
+write.csv(rrate.pop, "results/rrate_population_1mb10kb_merged.csv", row.names = FALSE)
+
+p_eco_r_pi <- rrate.eco %>%
+  filter(Sex == "male", r < 20) %>%
+  ggplot(aes(x = r, y = pi, color = Ecotype)) +
+  geom_point(alpha = 0.2, size = 0.2) +
+  geom_smooth(method = "glm", alpha = 0.5) +
+  theme_minimal() +
+  labs(x = "Recombination rate (cM/Mb)", y = "Nucleotide diversity") +
+  scale_color_manual(values = eco_colors)
+
+ggsave(
+  "figures/1mb10kb_ecotype_male_r_pi.png",
+  p_eco_r_pi,
+  width = 5,
+  height = 4,
+  dpi = 300
+)
+
+p_pop_r_pi <- rrate.pop %>%
+  filter(Sex == "female", r < 30) %>%
+  ggplot(aes(x = r, y = pi, color = Population)) +
+  geom_point(alpha = 0.2, size = 0.2) +
+  geom_smooth(method = "glm", alpha = 0.5) +
+  theme_minimal() +
+  labs(x = "Recombination rate (cM/Mb)", y = "Nucleotide diversity") +
+  scale_color_manual(values = pop_colors, name = NULL)
+
+ggsave(
+  "figures/1mb10kb_population_female_r_pi.png",
+  p_pop_r_pi,
+  width = 5,
+  height = 4,
+  dpi = 300
+)
+
+
+# -----------------------------
 # Zero and positive recombination models
 # -----------------------------
 
@@ -1140,49 +1141,6 @@ ggsave(
   dpi = 300
 )
 
-# -----------------------------
-# GWAS summary
-# -----------------------------
-
-if (file.exists("data/GWAS/CO.FarmCPU.csv")) {
-  gwas <- read.csv("data/GWAS/CO.FarmCPU.csv")
-  gwas2 <- read.csv("data/GWAS/CO.MLM.csv")
-  gwas3 <- read.csv("data/GWAS/CO.GLM.csv")
-
-  gwas$CHROM <- factor(gwas$CHROM, levels = chr_order)
-
-  p_gwas <- gwas %>%
-    filter(CO.FarmCPU < 0.01) %>%
-    ggplot(aes(x = POS / 1e06, y = -log10(CO.FarmCPU), color = CHROM)) +
-    geom_point(size = 0.5) +
-    facet_grid(. ~ CHROM, space = "free_x", scales = "free_x") +
-    theme_classic(base_size = 10) +
-    xlab("Map position") +
-    ylab("-log10(p-value)")
-
-  ggsave(
-    "figures/gwas_CO_FarmCPU.png",
-    p_gwas,
-    width = 8,
-    height = 3,
-    dpi = 300
-  )
-
-  common_gwas <- Reduce(
-    intersect,
-    list(
-      subset(gwas, CO.FarmCPU < 1e-04)[, 1],
-      subset(gwas2, CO.MLM < 1e-04)[, 1],
-      subset(gwas3, CO.GLM < 1e-04)[, 1]
-    )
-  )
-
-  write.csv(
-    data.frame(SNP = common_gwas),
-    "results/common_gwas_hits_1e-4.csv",
-    row.names = FALSE
-  )
-}
 
 # -----------------------------
 # Linkage map plots
@@ -1297,56 +1255,6 @@ if (file.exists("data/eco_sexdiff_map.txt")) {
   )
 }
 
-# -----------------------------
-# Path analysis
-# -----------------------------
-
-rrate.2.fw <- rrate.2.pop %>%
-  filter(Ecotype == "Freshwater") %>%
-  mutate(
-    cpg_scale = as.numeric(scale(cpg)),
-    r_scale = as.numeric(scale(r)),
-    pi_scale = as.numeric(scale(pi))
-  )
-
-rrate.2.ma <- rrate.2.pop %>%
-  filter(Ecotype == "Marine") %>%
-  mutate(
-    cpg_scale = as.numeric(scale(cpg)),
-    r_scale = as.numeric(scale(r)),
-    pi_scale = as.numeric(scale(pi))
-  )
-
-m.path.fw <- '
-r_scale ~ a*cpg_scale
-pi_scale ~ b*r_scale
-pi_scale ~ i*cpg_scale
-ab := a*b
-total := i + (a*b)
-'
-
-m.path.ma <- '
-cpg_scale ~ a*r_scale
-pi_scale ~ b*cpg_scale
-pi_scale ~ i*r_scale
-ab := a*b
-total := i + (a*b)
-'
-
-m.path.fit.fw <- sem(m.path.fw, data = rrate.2.fw)
-m.path.fit.ma <- sem(m.path.ma, data = rrate.2.ma)
-
-sink("results/path_analysis_summary.txt")
-
-cat("Freshwater path model\n")
-print(summary(m.path.fit.fw, standardized = TRUE, rsq = TRUE))
-print(fitmeasures(m.path.fit.fw))
-
-cat("\nMarine path model\n")
-print(summary(m.path.fit.ma, standardized = TRUE, rsq = TRUE))
-print(fitmeasures(m.path.fit.ma))
-
-sink()
 
 # -----------------------------
 # Save session information
