@@ -14,15 +14,11 @@ This repository contains the scripts used for linkage-map construction, recombin
 | `sex_specific_recombination_CO.R` | R script for sex-specific recombination-rate and crossover-number analyses. |
 | `window_recombination_diversity_analysis.R` | R script for window-based recombination, nucleotide diversity, CpG, gene density, repeat density, GWAS summary, and path analyses. |
 
-## Dependencies
+## Data availability
 
-### Command-line tools
+The 10 sex-specific linkage maps generated in this study have been deposited in Zenodo:
 
-The linkage-map pipeline requires:
+**DOI:** [10.5281/zenodo.17197823](https://doi.org/10.5281/zenodo.17197823)
 
-- `bash`
-- `snakemake`
-- `java`
-- `Lep-MAP3`
-The Lep-MAP3 path should be edited in the scripts if it differs from the local installation.
+These linkage maps are used as input for downstream recombination-rate estimation and sex-specific recombination analyses.
 
