@@ -1,8 +1,3 @@
-
----
-
-
-
 ```r
 library(glmmTMB)
 library(MuMIn)
